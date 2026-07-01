@@ -24,5 +24,4 @@ dist-ssr
 *.sw?
 
 # Amplify Gen 2
-amplify_outputs.json
 .amplify/
