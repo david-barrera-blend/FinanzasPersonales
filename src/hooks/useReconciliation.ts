@@ -104,21 +104,16 @@ export function useReconciliation(): UseReconciliationReturn {
   const [isLoading, setIsLoading] = useState(true);
   const [automaticAccumulated, setAutomaticAccumulatedState] = useState(0);
   const [manualAdjustment, setManualAdjustmentState] = useState(0);
-  const [cutoffDate, setCutoffDate] = useState(new Date().toISOString().split('T')[0]);
-  const [month, setMonth] = useState('');
-  const [year, setYear] = useState(new Date().getFullYear());
 
-  // Initialize month from current date
-  useEffect(() => {
-    const now = new Date();
-    const months = [
-      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
-    ];
-    setMonth(months[now.getMonth()]);
-    setYear(now.getFullYear());
-    setCutoffDate(now.toISOString().split('T')[0]);
-  }, []);
+  // Initialize with current date values immediately (not in useEffect)
+  const now = new Date();
+  const monthNames = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
+  ];
+  const [cutoffDate] = useState(now.toISOString().split('T')[0]);
+  const [month] = useState(monthNames[now.getMonth()]);
+  const [year] = useState(now.getFullYear());
 
   // Load accounts from Amplify
   useEffect(() => {
@@ -282,49 +277,69 @@ export function useReconciliation(): UseReconciliationReturn {
    * Persists the current reconciliation state to DynamoDB.
    */
   const saveReconciliation = useCallback(async () => {
-    const statusMap: Record<string, string> = {
+    // Map display status to enum value
+    const statusToEnum: Record<string, string> = {
       'Cuadrado': 'Cuadrado',
       'Falta ubicar': 'FaltaUbicar',
       'Sobra': 'Sobra',
     };
 
-    try {
-      const { data: reconRecord, errors } = await client.models.CashReconciliation.create({
-        cutoffDate: reconciliation.cutoffDate,
-        month: reconciliation.month,
-        year: reconciliation.year,
-        automaticAccumulated: reconciliation.automaticAccumulated,
-        manualAdjustment: reconciliation.manualAdjustment,
-        totalBase: reconciliation.totalBase,
-        totalLocated: reconciliation.totalLocated,
-        pendingToLocate: reconciliation.pendingToLocate,
-        locatedPercentage: reconciliation.locatedPercentage,
-        status: statusMap[reconciliation.status] ?? 'FaltaUbicar',
-      } as any);
+    const enumStatus = statusToEnum[reconciliation.status] ?? 'FaltaUbicar';
 
-      if (errors && errors.length > 0) {
-        console.error('Error saving reconciliation:', errors);
-        throw new Error(errors[0].message);
-      }
+    const input = {
+      cutoffDate: reconciliation.cutoffDate,
+      month: reconciliation.month,
+      year: reconciliation.year,
+      automaticAccumulated: reconciliation.automaticAccumulated || 0,
+      manualAdjustment: reconciliation.manualAdjustment || 0,
+      totalBase: reconciliation.totalBase || 0,
+      totalLocated: reconciliation.totalLocated || 0,
+      pendingToLocate: reconciliation.pendingToLocate || 0,
+      locatedPercentage: reconciliation.locatedPercentage || 0,
+      status: enumStatus,
+    };
 
-      if (reconRecord) {
-        // Save individual balances
-        const activeAccounts = accounts.filter((a) => a.isActive);
-        await Promise.all(
-          activeAccounts.map((acc) =>
-            client.models.CashBalance.create({
-              reconciliationId: reconRecord.id,
-              accountId: acc.id,
-              accountName: acc.name,
-              balance: acc.balance,
-            } as any)
-          )
-        );
-      }
-    } catch (err) {
-      console.error('saveReconciliation failed:', err);
-      throw err;
+    console.log('Saving reconciliation with input:', input);
+
+    const result = await client.models.CashReconciliation.create(input as any);
+
+    console.log('CashReconciliation.create result:', result);
+
+    if (result.errors && result.errors.length > 0) {
+      const errorMsg = result.errors.map((e: any) => e.message).join('; ');
+      console.error('CashReconciliation create errors:', result.errors);
+      throw new Error(errorMsg);
     }
+
+    const reconRecord = result.data;
+    if (!reconRecord) {
+      throw new Error('No se recibió respuesta al guardar la conciliación');
+    }
+
+    // Save individual balances for active accounts
+    const activeAccounts = accounts.filter((a) => a.isActive && a.balance !== 0);
+
+    if (activeAccounts.length > 0) {
+      const balanceResults = await Promise.all(
+        activeAccounts.map((acc) =>
+          client.models.CashBalance.create({
+            reconciliationId: reconRecord.id,
+            accountId: acc.id,
+            accountName: acc.name,
+            balance: acc.balance,
+          } as any)
+        )
+      );
+
+      // Check for balance creation errors
+      for (const br of balanceResults) {
+        if (br.errors && br.errors.length > 0) {
+          console.error('CashBalance create error:', br.errors);
+        }
+      }
+    }
+
+    console.log('Reconciliation saved successfully, id:', reconRecord.id);
   }, [reconciliation, accounts]);
 
   return {

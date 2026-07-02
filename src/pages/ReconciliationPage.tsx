@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Save } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -73,21 +73,21 @@ export default function ReconciliationPage() {
   );
 
   // Handle save
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     setIsSaving(true);
     setSaveMessage('');
     try {
       await saveReconciliation();
       setSaveMessage('Conciliación guardada exitosamente');
-      setTimeout(() => setSaveMessage(''), 3000);
+      setTimeout(() => setSaveMessage(''), 4000);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al guardar la conciliación';
+      const msg = err instanceof Error ? err.message : 'Error desconocido al guardar';
       setSaveMessage(`Error: ${msg}`);
       console.error('Save reconciliation error:', err);
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [saveReconciliation]);
 
   // Chart data: distribution of balances by account (active only)
   const chartData = useMemo(() => {
