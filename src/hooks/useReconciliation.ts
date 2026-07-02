@@ -277,69 +277,56 @@ export function useReconciliation(): UseReconciliationReturn {
    * Persists the current reconciliation state to DynamoDB.
    */
   const saveReconciliation = useCallback(async () => {
-    // Map display status to enum value
+    // Map display status to schema enum value
     const statusToEnum: Record<string, string> = {
       'Cuadrado': 'Cuadrado',
       'Falta ubicar': 'FaltaUbicar',
       'Sobra': 'Sobra',
     };
 
-    const enumStatus = statusToEnum[reconciliation.status] ?? 'FaltaUbicar';
+    const enumStatus = statusToEnum[reconciliation.status] || 'FaltaUbicar';
 
-    const input = {
+    // Build input - ensure all required float fields have valid numbers
+    const input: Record<string, unknown> = {
       cutoffDate: reconciliation.cutoffDate,
       month: reconciliation.month,
       year: reconciliation.year,
-      automaticAccumulated: reconciliation.automaticAccumulated || 0,
-      manualAdjustment: reconciliation.manualAdjustment || 0,
-      totalBase: reconciliation.totalBase || 0,
-      totalLocated: reconciliation.totalLocated || 0,
-      pendingToLocate: reconciliation.pendingToLocate || 0,
-      locatedPercentage: reconciliation.locatedPercentage || 0,
+      automaticAccumulated: Number(reconciliation.automaticAccumulated) || 0,
+      manualAdjustment: Number(reconciliation.manualAdjustment) || 0,
+      totalBase: Number(reconciliation.totalBase) || 0,
+      totalLocated: Number(reconciliation.totalLocated) || 0,
+      pendingToLocate: Number(reconciliation.pendingToLocate) || 0,
+      locatedPercentage: Number(reconciliation.locatedPercentage) || 0,
       status: enumStatus,
     };
 
-    console.log('Saving reconciliation with input:', input);
-
-    const result = await client.models.CashReconciliation.create(input as any);
-
-    console.log('CashReconciliation.create result:', result);
+    const result = await (client.models.CashReconciliation.create as any)(input);
 
     if (result.errors && result.errors.length > 0) {
       const errorMsg = result.errors.map((e: any) => e.message).join('; ');
-      console.error('CashReconciliation create errors:', result.errors);
       throw new Error(errorMsg);
     }
 
     const reconRecord = result.data;
     if (!reconRecord) {
-      throw new Error('No se recibió respuesta al guardar la conciliación');
+      throw new Error('No se pudo guardar la conciliación — respuesta vacía del servidor');
     }
 
-    // Save individual balances for active accounts
-    const activeAccounts = accounts.filter((a) => a.isActive && a.balance !== 0);
+    // Save individual balances for active accounts with non-zero balance
+    const activeAccounts = accounts.filter((a) => a.isActive);
 
     if (activeAccounts.length > 0) {
-      const balanceResults = await Promise.all(
+      await Promise.all(
         activeAccounts.map((acc) =>
-          client.models.CashBalance.create({
+          (client.models.CashBalance.create as any)({
             reconciliationId: reconRecord.id,
             accountId: acc.id,
             accountName: acc.name,
-            balance: acc.balance,
-          } as any)
+            balance: Number(acc.balance) || 0,
+          })
         )
       );
-
-      // Check for balance creation errors
-      for (const br of balanceResults) {
-        if (br.errors && br.errors.length > 0) {
-          console.error('CashBalance create error:', br.errors);
-        }
-      }
     }
-
-    console.log('Reconciliation saved successfully, id:', reconRecord.id);
   }, [reconciliation, accounts]);
 
   return {
