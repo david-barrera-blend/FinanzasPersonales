@@ -115,7 +115,7 @@ export function useReconciliation(): UseReconciliationReturn {
   const [month] = useState(monthNames[now.getMonth()]);
   const [year] = useState(now.getFullYear());
 
-  // Load accounts from Amplify
+  // Load accounts from Amplify and restore last reconciliation balances
   useEffect(() => {
     if (!isAuthenticated || !user) {
       setIsLoading(false);
@@ -131,14 +131,15 @@ export function useReconciliation(): UseReconciliationReturn {
 
         if (cancelled) return;
 
+        let loadedAccounts: CashAccount[];
+
         if (items && items.length > 0) {
-          const loadedAccounts: CashAccount[] = items.map((item) => ({
+          loadedAccounts = items.map((item) => ({
             id: item.id,
             name: item.name,
             isActive: item.isActive,
-            balance: 0, // Balances are per-reconciliation, start at 0
+            balance: 0,
           }));
-          setAccounts(loadedAccounts);
         } else {
           // First time: create default accounts in DB
           const defaults = buildDefaultAccounts();
@@ -161,9 +162,52 @@ export function useReconciliation(): UseReconciliationReturn {
             }
           }
 
-          if (!cancelled) {
-            setAccounts(created.length > 0 ? created : defaults);
+          loadedAccounts = created.length > 0 ? created : defaults;
+        }
+
+        if (cancelled) return;
+
+        // Load the most recent reconciliation to restore balances
+        try {
+          const { data: reconciliations } = await (client.models as any).CashReconciliation.list({
+            limit: 50,
+          });
+
+          if (reconciliations && reconciliations.length > 0) {
+            // Sort by createdAt descending to get the most recent
+            const sorted = [...reconciliations].sort((a: any, b: any) =>
+              (b.createdAt || '').localeCompare(a.createdAt || '')
+            );
+            const latest = sorted[0];
+
+            // Load balances for the latest reconciliation
+            const { data: balances } = await (client.models as any).CashBalance.list({
+              filter: { reconciliationId: { eq: latest.id } },
+              limit: 100,
+            });
+
+            if (balances && balances.length > 0) {
+              // Apply saved balances to accounts
+              loadedAccounts = loadedAccounts.map((acc) => {
+                const savedBalance = balances.find((b: any) => b.accountId === acc.id);
+                return {
+                  ...acc,
+                  balance: savedBalance ? Number(savedBalance.balance) : 0,
+                };
+              });
+            }
+
+            // Restore manual adjustment from the last reconciliation
+            if (latest.manualAdjustment != null) {
+              setManualAdjustmentState(Number(latest.manualAdjustment) || 0);
+            }
           }
+        } catch (err) {
+          console.warn('Could not load last reconciliation:', err);
+        }
+
+        if (!cancelled) {
+          setAccounts(loadedAccounts);
         }
       } catch (err) {
         console.error('Error loading accounts:', err);
