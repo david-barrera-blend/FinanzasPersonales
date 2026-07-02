@@ -24,5 +24,8 @@ dist-ssr
 *.sw?
 
 # Amplify Gen 2
-amplify_outputs.json
 .amplify/
+amplify_outputs.json
+
+# npm (no longer used)
+package-lock.json
