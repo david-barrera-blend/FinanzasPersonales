@@ -64,7 +64,17 @@ export function useCatalogs(): UseCatalogsReturn {
   const [categories, setCategories] = useState<CatalogItem[]>([]);
   const [concepts, setConcepts] = useState<CatalogItem[]>([]);
   const [years, setYears] = useState<CatalogItem[]>([]);
-  const [currencies, setCurrencies] = useState<CatalogItem[]>(buildBaseCurrencies());
+  const [currencies, setCurrencies] = useState<CatalogItem[]>(() => {
+    // Load custom currencies from localStorage
+    try {
+      const saved = localStorage.getItem('custom_currencies');
+      if (saved) {
+        const custom: CatalogItem[] = JSON.parse(saved);
+        return [...buildBaseCurrencies(), ...custom];
+      }
+    } catch { /* ignore */ }
+    return buildBaseCurrencies();
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   const months: CatalogItem[] = buildBaseMonths();
@@ -118,6 +128,20 @@ export function useCatalogs(): UseCatalogsReturn {
             isBase: y === currentYear,
           });
         }
+
+        // Load custom years from localStorage
+        try {
+          const savedYears = localStorage.getItem('custom_years');
+          if (savedYears) {
+            const custom: CatalogItem[] = JSON.parse(savedYears);
+            for (const cy of custom) {
+              if (!yearItems.some((y) => y.name === cy.name)) {
+                yearItems.push(cy);
+              }
+            }
+          }
+        } catch { /* ignore */ }
+
         setYears(yearItems);
       } catch (err) {
         console.error('Error loading catalogs:', err);
@@ -331,7 +355,12 @@ export function useCatalogs(): UseCatalogsReturn {
         isBase: false,
       };
 
-      setYears((prev) => [...prev, newYear]);
+      const updated = [...years, newYear];
+      setYears(updated);
+
+      // Persist custom years to localStorage
+      const customOnly = updated.filter((y) => !y.isBase);
+      localStorage.setItem('custom_years', JSON.stringify(customOnly));
     },
     [years]
   );
@@ -354,7 +383,12 @@ export function useCatalogs(): UseCatalogsReturn {
         isBase: false,
       };
 
-      setCurrencies((prev) => [...prev, newCurrency]);
+      const updated = [...currencies, newCurrency];
+      setCurrencies(updated);
+
+      // Persist custom currencies to localStorage
+      const customOnly = updated.filter((c) => !c.isBase);
+      localStorage.setItem('custom_currencies', JSON.stringify(customOnly));
     },
     [currencies]
   );
